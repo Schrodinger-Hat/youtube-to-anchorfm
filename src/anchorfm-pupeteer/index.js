@@ -9,9 +9,9 @@ function addUrlToDescription(youtubeVideoInfo) {
 
 async function setPublishDate(page, navigationPromise, date) {
   console.log('-- Setting publish date');
-  const publishDateButtonSelector = '//span[contains(text(),"Publish date:")]/following-sibling::button';
-  const [publishDateButton] = await page.$x(publishDateButtonSelector);
-  await publishDateButton.click();
+  await clickXpath(page,
+    '//span[contains(text(),"Publish date:")]/following-sibling::button',
+    env.UPLOAD_TIMEOUT)
   await navigationPromise;
 
   await resetDatePickerToSelectYears(page, navigationPromise);
@@ -19,9 +19,9 @@ async function setPublishDate(page, navigationPromise, date) {
   await selectMonthInDatePicker(page, navigationPromise, date.month);
   await selectDayInDatePicker(page, navigationPromise, date.day);
 
-  const confirmButtonSelector = '//span[contains(text(),"Confirm")]/parent::button';
-  const [confirmButton] = await page.$x(confirmButtonSelector);
-  await confirmButton.click();
+  await clickXpath(page,
+    '//span[contains(text(),"Confirm")]/parent::button',
+    env.UPLOAD_TIMEOUT)
   await navigationPromise;
 }
 
@@ -72,11 +72,39 @@ async function selectMonthInDatePicker(page, navigationPromise, month) {
 
 async function selectDayInDatePicker(page, navigationPromise, day) {
   const dayWithRemovedZeroPad = parseInt(day, 10);
-  const tdDay = await page.$(
-    `tbody > tr > td[data-value="${dayWithRemovedZeroPad}"][class*="rdtDay"]:not([class*="rdtOld"]:not([class*="rtdNew"])`
-  );
+  const [tdDay] = await page.$x(`//tbody/tr/td[contains(text(), "${dayWithRemovedZeroPad}") and contains(@class, 'rdtDay') and not(contains(@class, 'rdtNew')) and not(contains(@class, 'rdtOld'))]`);
   await tdDay.click();
   await navigationPromise;
+}
+
+async function clickSelector(page, selector, timeout) {
+  try {
+    await page.waitForSelector(selector, { timeout: timeout });
+    const element = await page.$(selector);
+    await clickDom(page, element);
+  } catch (error) {
+    console.error(`Error clicking selector: ${selector}`);
+    console.error(error);
+  }
+}
+
+async function clickXpath(page, xpath, timeout){
+  try{
+    const xpathElem = xpath
+    await page.waitForXPath(xpathElem, { timeout: timeout });
+    const [xpathBtn] = await page.$x(xpathElem);
+    await clickDom(page,xpathBtn)
+  }catch (error){
+    console.log(`Error clicking xPath: ${xpathElem}`)
+  }
+  
+}
+
+async function clickDom(page, domBtn){
+  await page.evaluate((elem)=>{
+    elem.click();
+  }, domBtn)
+
 }
 
 async function postEpisode(youtubeVideoInfo) {
@@ -100,10 +128,36 @@ async function postEpisode(youtubeVideoInfo) {
     and because pupeteer treats the page as loaded(or navigated to) 
     even when the form is not showed
     */
+
+    await clickXpath(page,
+      '//button[@aria-label="Change language"]',
+      env.UPLOAD_TIMEOUT);
+    await navigationPromise;
+
+    await clickXpath(page,
+      '//a[@data-testid="language-option-en"]',
+      env.UPLOAD_TIMEOUT)
+    await navigationPromise;
+
+    try{
+      //await new Promise((r) => {setTimeout(r, 70 * 1000);});
+      await clickSelector(page, '#onetrust-pc-btn-handler', env.COOKIE_TIMEOUT);
+      await clickSelector(page, '#cookie-preferences > div.save-preference-btn-container > button', env.UPLOAD_TIMEOUT);
+
+    }catch (err){
+      console.log('Cookie already accepted')
+    }    
     await page.waitForSelector('#email');
     await page.type('#email', env.ANCHOR_EMAIL);
     await page.type('#password', env.ANCHOR_PASSWORD);
-    await page.click('button[type=submit]');
+    await page.evaluate((selector) => {
+      const button = document.querySelector(selector);
+      if (button) {
+        button.click();
+      } else {
+        throw new Error('No element found with the selector "${selector}"');
+      }
+    }, 'button[type=submit]');
     await navigationPromise;
     console.log('Logged in');
 
@@ -117,12 +171,11 @@ async function postEpisode(youtubeVideoInfo) {
       setTimeout(r, 25 * 1000);
     });
 
-    const saveEpisodeButtonSelector = '//span[contains(text(),"Save")]/parent::button[not(boolean(@disabled))]';
-    await page.waitForXPath(saveEpisodeButtonSelector, { timeout: env.UPLOAD_TIMEOUT });
-    const [saveButton] = await page.$x(saveEpisodeButtonSelector);
-    await saveButton.click();
+    await clickXpath(page,
+      '//span[contains(text(),"Save")]/parent::button[not(boolean(@disabled))]',
+      env.UPLOAD_TIMEOUT)
     await navigationPromise;
-
+    
     console.log('-- Adding title');
     await page.waitForSelector('#title', { visible: true });
     // Wait some time so any field refresh doesn't mess up with our input
@@ -155,18 +208,18 @@ async function postEpisode(youtubeVideoInfo) {
       await inputEpisodeArt.uploadFile(env.THUMBNAIL_FILE);
 
       console.log('-- Saving uploaded episode art');
-      const saveThumbnailButtonSelector = '//span[text()="Save"]/parent::button';
-      await page.waitForXPath(saveThumbnailButtonSelector);
-      const [saveEpisodeArtButton] = await page.$x(saveThumbnailButtonSelector);
-      await saveEpisodeArtButton.click();
+      await clickXpath(page,
+        '//span[text()="Save"]/parent::button',
+        env.UPLOAD_TIMEOUT)
+
       await page.waitForXPath('//div[@aria-label="image uploader"]', { hidden: true, timeout: env.UPLOAD_TIMEOUT });
     }
 
     const saveDraftOrPublishOrScheduleButtonDescription = getSaveDraftOrPublishOrScheduleButtonDescription();
     console.log(`-- ${saveDraftOrPublishOrScheduleButtonDescription.message}`);
-
-    const [saveDraftOrPublishOrScheduleButton] = await page.$x(saveDraftOrPublishOrScheduleButtonDescription.xpath);
-    await saveDraftOrPublishOrScheduleButton.click();
+    await clickXpath(page,
+      saveDraftOrPublishOrScheduleButtonDescription.xpath,
+      env.UPLOAD_TIMEOUT);
     await navigationPromise;
 
     console.log('Yay');
@@ -182,6 +235,7 @@ async function postEpisode(youtubeVideoInfo) {
 function getSaveDraftOrPublishOrScheduleButtonDescription() {
   if (env.SAVE_AS_DRAFT) {
     return {
+      selector: '#app-content > div > form > div.sc-kgwpUT.fYJoqV > div.sc-hGVAJH.sc-lfzZHy.dnsAoX.kwvghZ > button.Button-sc-y0gtbx-0.kCUxRI',
       xpath: '//button[text()="Save as draft"]',
       message: 'Saving draft',
     };
@@ -189,12 +243,14 @@ function getSaveDraftOrPublishOrScheduleButtonDescription() {
 
   if (env.SET_PUBLISH_DATE) {
     return {
+      selector: '#app-content > div > form > div.sc-kgwpUT.fYJoqV > div.sc-hGVAJH.sc-lfzZHy.dnsAoX.kwvghZ > button.Button-sc-qlcn5g-0.hWxHrB > span.ButtonInner-sc-14ud5tc-0.cLOWub.encore-bright-accent-set',
       xpath: '//span[text()="Schedule episode"]/parent::button',
       message: 'Scheduling',
     };
   }
 
   return {
+    selector: '#app-content > div > form > div.sc-kgwpUT.fYJoqV > div.sc-hGVAJH.sc-lfzZHy.dnsAoX.kwvghZ > button.Button-sc-qlcn5g-0.hWxHrB',
     xpath: '//span[text()="Publish now"]/parent::button',
     message: 'Publishing',
   };
